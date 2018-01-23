@@ -35,18 +35,39 @@ managing_init(Amount, FloorRange, RandomOn) when is_integer(Amount)
             RandomPID = spawn_link(?MODULE, random_floor_init, [self(), FloorRange]),
             put(random, RandomPID)
     end,
-    managing_loop([]).
+    managing_loop().
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%TODO: dodac obsluge podzialu zadan/ mowienia windzie gdzie jechac
-managing_loop(List) when is_list(List) -> 
+managing_loop()  -> 
     receive
-        {random, Floor, Direction} ->
-            io:write(Floor),
-            managing_loop(List ++ [{Floor, Direction}] );
+        {random, Floor, Dest} ->
+            lists:foreach(fun(X) -> body end, get(elevators)),
+            get_lengths_of_queues(Floor, Dest,0, get(amount), []),
+            managing_loop();
         {get, ok} -> ok;
         the_end -> managing_end()
     end.
+
+get_lengths_of_queues(Floor, Dest, X, X, L ) when is_integer(Floor)
+                                          andalso is_integer(Dest)
+                                             ->
+    choose_elevator(Floor, Dest, L, 0);
+get_lengths_of_queues(Floor, Dest, Got, Amount, L ) when is_integer(Floor)
+                                          andalso is_integer(Dest)
+                                             ->
+    receive
+        {length, Length, PID} -> get_lengths_of_queues(Floor, Dest, Got+1, Amount, L++[{Length, PID}])
+    end.
+
+choose_elevator(Floor, Dest, [H | T], 0) -> choose_elevator(Floor, Dest, T, H);
+choose_elevator(Floor, Dest, [], {_, PID}) when Dest > Floor -> PID!{updateQueue,{Floor,1,Dest}};
+choose_elevator(Floor, Dest, [], {_, PID}) when Dest < Floor -> PID!{updateQueue,{Floor,-1,Dest}};
+choose_elevator(Floor, Dest, [{LQ, PIDQ} | T}], {L, PID}) when LQ < L -> choose_elevator(Floor, Dest, T, {LQ, PIDQ});
+choose_elevator(Floor, Dest, [{LQ, PIDQ} | T}], {L, PID}) when LQ >= L -> choose_elevator(Floor, Dest, T, {L, PID}.
+
+
+
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%TODO
 managing_end() -> 
@@ -96,8 +117,8 @@ elevator_loop(Position, Direction, [ {HeadQueueFloor, HeadQueueDir, HeadQueueDst
             end;
         {updateQueue, {NewFloor, NewDir, NewDst}} -> 
             elevator_loop(Position, Direction, update_queue([ {HeadQueueFloor, HeadQueueDir, HeadQueueDst} | TailQueue ], {NewFloor, NewDir, NewDst}));
-        {getQueue, ManagerPID} -> 
-            ManagerPID!{[ {HeadQueueFloor, HeadQueueDir, HeadQueueDst} | TailQueue ], get(ord)};
+        {getQueueLength, ManagerPID} -> 
+            ManagerPID!{length, length([ {HeadQueueFloor, HeadQueueDir, HeadQueueDst} | TailQueue ]), self()};
         the_end -> elevator_end()
     end.
 
@@ -184,7 +205,7 @@ random_floor_loop() ->
             random_floor_end()
     after
         3500 ->
-            get(manager_pid)!{random, 5, d},
+            get(manager_pid)!{random, 5, 6},
             random_floor_loop() % trzeba ogarnac jak wybierac pietra z zakresow
     end.
 
@@ -241,19 +262,24 @@ draw_update(Ord, OldPos, NewPos) when is_integer(Ord)
 
 
 next_floor_dir(_, []) -> 0;
-next_floor_dir(Pos, [{Fl,_,_}]) when Pos < Fl -> -1;
-next_floor_dir(Pos, [{Fl,_,_}]) when Pos > Fl -> 1;
+next_floor_dir(Pos, [{Fl,_,_} | _]) when Pos < Fl -> -1;
+next_floor_dir(Pos, [{Fl,_,_} | _]) when Pos > Fl -> 1;
 
-updateQueue([], {NFl, NDir, NDst}) when is_integer(NFl)
-                                andalso is_integer(NDir)
-                                andalso is_integer(NDst)
-                                   -> 
+updateQueue([], {NFl, NDir, NDst}, _, _) when is_integer(NFl)
+                                   andalso is_integer(NDir)
+                                   andalso is_integer(NDst)
+                                      -> 
     [{NFl, NDir, NDst}];
-update_queue([ {HQFl, HQDir, HQDst} | TailQueue ], {NewFloor, NewDir, NewDst}) when is_integer(HQFl)
+update_queue([ {HQFl, HQDir, HQDst} | TailQueue ], {NewFloor, NewDir, NewDst}, Dir, Pos) when is_integer(HQFl)
                                                                             andalso is_integer(HQDir)
                                                                             andalso is_integer(HQDst)
                                                                             andalso is_integer(NewFloor)
                                                                             andalso is_integer(NewDir)
                                                                             andalso is_integer(NewDst)
                                                                             ->
-    
+    if 
+        and((NewDir-Pos)*(HQFl-Pos) < 0 , NewDir == Dir )
+            [{NewFloor, NewDir, NewDst}, {HQFl, HQDir, HQDst} | TailQueue];
+        true ->
+            [ {HQFl, HQDir, HQDst}} ++ update_queue(TailQueue, {NewFloor, NewDir, NewDst}, next_floor_dir(HQFl, TailQueue), HQDir, HQFl)
+    end.
