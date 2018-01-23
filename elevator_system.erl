@@ -32,7 +32,8 @@ managing_init(Amount, FloorRange, RandomOn) when is_integer(Amount)
     get_all_elevators_ready(Amount),
     if
         RandomOn ->
-            RandomPID = spawn_link(?MODULE, random_floor_init, [self(), FloorRange])
+            RandomPID = spawn_link(?MODULE, random_floor_init, [self(), FloorRange]),
+            put(random, RandomPID)
     end,
     managing_loop([]).
 
@@ -49,7 +50,12 @@ managing_loop(List) when is_list(List) ->
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%TODO
 managing_end() -> 
-    "send to all the_end".
+    lists:foreach(fun (X) -> X!the_end end, get(elevators)),
+    get(drawing)!the_end,
+    if
+        get(random) =/= unfedined ->
+            get(random)!the_end
+    end.
 
 elevator_init(OrdinalNumber, Lowest, Highest, ManagingPID, DrawingPID) when Lowest < Highest
                                                                     andalso is_integer(OrdinalNumber)
@@ -88,8 +94,11 @@ elevator_loop(Position, Direction, [ {HeadQueueFloor, HeadQueueDir, HeadQueueDst
                     get(cycle_pid)!{move, HeadQueueDir},
                     elevator_loop(NewState, NDir, [ {HeadQueueFloor, HeadQueueDir, HeadQueueDst} | TailQueue ])
             end;
-        {updateQueue, {NewFloor, NewDir, NewDst}}
-
+        {updateQueue, {NewFloor, NewDir, NewDst}} -> 
+            elevator_loop(Position, Direction, update_queue([ {HeadQueueFloor, HeadQueueDir, HeadQueueDst} | TailQueue ], {NewFloor, NewDir, NewDst}));
+        {getQueue, ManagerPID} -> 
+            ManagerPID!{[ {HeadQueueFloor, HeadQueueDir, HeadQueueDst} | TailQueue ], get(ord)};
+        the_end -> elevator_end()
     end.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%TODO
@@ -179,7 +188,12 @@ random_floor_loop() ->
             random_floor_loop() % trzeba ogarnac jak wybierac pietra z zakresow
     end.
 
-random_floor_end() -> io:fwrite("random_floor_end").
+random_floor_end() -> ok.
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%           %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% DODATKOWE %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%           %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 get_all_elevators_ready(0) -> ok;
 get_all_elevators_ready(Amount) when is_integer(Amount)
@@ -229,3 +243,17 @@ draw_update(Ord, OldPos, NewPos) when is_integer(Ord)
 next_floor_dir(_, []) -> 0;
 next_floor_dir(Pos, [{Fl,_,_}]) when Pos < Fl -> -1;
 next_floor_dir(Pos, [{Fl,_,_}]) when Pos > Fl -> 1;
+
+updateQueue([], {NFl, NDir, NDst}) when is_integer(NFl)
+                                andalso is_integer(NDir)
+                                andalso is_integer(NDst)
+                                   -> 
+    [{NFl, NDir, NDst}];
+update_queue([ {HQFl, HQDir, HQDst} | TailQueue ], {NewFloor, NewDir, NewDst}) when is_integer(HQFl)
+                                                                            andalso is_integer(HQDir)
+                                                                            andalso is_integer(HQDst)
+                                                                            andalso is_integer(NewFloor)
+                                                                            andalso is_integer(NewDir)
+                                                                            andalso is_integer(NewDst)
+                                                                            ->
+    
