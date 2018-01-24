@@ -26,7 +26,9 @@ managing_init(Amount, FloorRange) when is_integer(Amount)
     put(amount, Amount),
     put(range, FloorRange),
     %io:write(get(elevators)),
-    lists:foreach(fun(X) -> X!{manager, self()}, io:fwrite("sent")  end ,PIDs),
+    lists:foreach(fun(X) -> 
+                            X!{manager, self()} %, io:fwrite("sent")  
+                  end ,PIDs),
     get_all_elevators_ready(Amount),
     
     RandomPID = spawn_link(?MODULE, random_floor_init, [self(), FloorRange]),
@@ -83,20 +85,47 @@ elevator_init(OrdinalNumber, Lowest, Highest, ManagingPID, DrawingPID) when Lowe
     put(ord, OrdinalNumber),
     put(range, [Lowest, Highest]),
     ManagingPID!{ready, self()},
+    io:write(xxxx),
     elevator_loop(0, 0, [], true).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%TODO
+elevator_loop(Position, Direction, [], IsIdle) when is_integer(Position)
+                                            andalso is_integer(Direction)
+                                            andalso is_boolean(IsIdle)
+                                               -> 
+    io:write(0),
+    receive
+        {updateQueue, {NewFloor, NewDir, NewDst}} -> 
+            io:write(5),
+            if
+                IsIdle ->
+                    io:write(6),
+                    get(cycle_pid)!{move, Position, NewDir, NewFloor}
+            end,
+            elevator_loop(Position, Direction, [{NewFloor, NewDir, NewDst}], false);
+        {getQueueLength, ManagerPID} -> 
+            io:write(7),
+            ManagerPID!{length, 0, self()},
+            elevator_loop(Position, Direction, [], IsIdle);
+        the_end -> io:write(8),elevator_end()
+    end;
+
 elevator_loop(Position, Direction, [ {HeadQueueFloor, HeadQueueDir, HeadQueueDst} | TailQueue ], IsIdle) when is_integer(Position)
-                                andalso is_integer(Direction)
-                                   -> 
+                                                                                                      andalso is_integer(Direction)
+                                                                                                      andalso is_boolean(IsIdle)
+                                                                                                         -> 
+    io:write(0),
     receive
         {updateState, NewState, Dir} -> 
+            io:fwrite("AGH"),
             if 
-                (NewState == HeadQueueFloor) and (HeadQueueDir =/= 0) -> 
+                (NewState == HeadQueueFloor) and (HeadQueueDir =/= 0) and (HeadQueueDst =/= -1000)-> 
+                    io:write(2),
                     get(cycle_pid)!{open, NewState, HeadQueueDir, HeadQueueDst},
-                    self()!{updateQueue},
+                    update_queue( TailQueue , {HeadQueueDst, HeadQueueDir, (-1000)}, Direction, Position),
                     elevator_loop(NewState, HeadQueueDir, TailQueue, false);
                 (NewState == HeadQueueFloor) and (HeadQueueDir == 0) ->
+                    io:write(3),
                     NDir = next_floor_dir(NewState, TailQueue),
                     if 
                         NDir == 0 ->
@@ -107,18 +136,25 @@ elevator_loop(Position, Direction, [ {HeadQueueFloor, HeadQueueDir, HeadQueueDst
                             elevator_loop(NewState, NDir, TailQueue, false)
                     end;
                 (NewState =/= HeadQueueFloor) ->
+                io:write(4),
                     get(cycle_pid)!{move, HeadQueueDir},
                     elevator_loop(NewState, Dir, [ {HeadQueueFloor, HeadQueueDir, HeadQueueDst} | TailQueue ], false)
             end;
         {updateQueue, {NewFloor, NewDir, NewDst}} -> 
+            io:write(5),
             if
-                IsIdle->
-                    get(cycle_pid)!{move, Position, NewDir, NewFloor}
+                IsIdle ->
+                    io:write(6),
+                    get(cycle_pid)!{move, Position, NewDir, NewFloor};
+                true ->
+                    ok
             end,
             elevator_loop(Position, Direction, update_queue([ {HeadQueueFloor, HeadQueueDir, HeadQueueDst} | TailQueue ], {NewFloor, NewDir, NewDst}, Direction, Position), false);
         {getQueueLength, ManagerPID} -> 
-            ManagerPID!{length, length([ {HeadQueueFloor, HeadQueueDir, HeadQueueDst} | TailQueue ]), self()};
-        the_end -> elevator_end()
+            io:write(7),
+            ManagerPID!{length, length([ {HeadQueueFloor, HeadQueueDir, HeadQueueDst} | TailQueue ]), self()},
+            elevator_loop(Position, Direction, [ {HeadQueueFloor, HeadQueueDir, HeadQueueDst} | TailQueue ], IsIdle);
+        the_end -> io:write(8),elevator_end()
     end.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%TODO
@@ -194,7 +230,7 @@ drawing_end() -> ok.
 
 random_floor_init(ManagerPID, Range) when is_list(Range)
                                      ->
-    io:write(xDDD), 
+    %io:write(xDDD), 
     put(manager_pid, ManagerPID),
     put(range, range),
     random_floor_loop().
@@ -264,6 +300,7 @@ draw_update(Ord, OldPos, NewPos) when is_integer(Ord)
 next_floor_dir(_, []) -> 0;
 next_floor_dir(Pos, [{Fl,_,_} | _]) when Pos < Fl -> -1;
 next_floor_dir(Pos, [{Fl,_,_} | _]) when Pos > Fl -> 1.
+
 
 update_queue([], {NFl, NDir, NDst}, _, _) when is_integer(NFl)
                                      andalso is_integer(NDir)
