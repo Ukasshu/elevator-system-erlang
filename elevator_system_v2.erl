@@ -80,9 +80,18 @@ random_loop() ->
             random_end()
     after
         3500 ->
-            io:fwrite("3500~n"),
-            get(managing_process)!{random, 5, 6},
-            random_loop()
+            %io:fwrite("3500~n"),
+            H = get(high),
+            L = get(low),
+            Floor = random:uniform(H-L+1) + L -1,
+            Dst = random:uniform(H-L+1) + L -1,
+            if 
+                Floor =/= Dst -> 
+                    get(managing_process)!{random, 5, 6},
+                    random_loop();
+                true ->
+                    ok
+            end
     end.
 
 random_end() -> ok.
@@ -105,38 +114,46 @@ elevator_loop(Pos, Dir, Queue) ->
             NewQueue = update_queue(Queue, Pos, NewFloor, quick_dir(NewFloor, NewDest), NewDest),
             if 
                 Dir == 0 ->
-                    get(cycle_process)!{move, Pos, quick_dir(Pos, NewFloor)}
+                    get(cycle_process)!{move, Pos, quick_dir(Pos, NewFloor)};
+                true -> ok
             end,
             elevator_loop(Pos,Dir, NewQueue);
         {getQueueLength, ManagingPID} ->
             ManagingPID!{length, self(), length(Queue)},
             elevator_loop(Pos, Dir, Queue);
-        {updateState, NPos, Dir} ->
+        {updateState, NPos, DDir} ->
             [{HPos, HDir, HDst} | Tail] = Queue,
             if 
                 HDst ==(-1000) ->
                     if
                         NPos =/= HPos ->
+                            %io:fwrite("case A"),
                             get(cycle_process)!{move, NPos, Dir},
-                            elevator_loop(NPos, Dir, Queue);
+                            elevator_loop(NPos, DDir, Queue);
                         NPos == HPos ->
+                            %io:fwrite("case B"),
                             NDir = calculate_dir(NPos, Tail),
                             if 
                                 NDir == 0 ->
+                                    %io:fwrite("case C"),
                                     get(cycle_process)!{idle},
                                     elevator_loop(NPos, NDir, Tail);
                                 true ->
+                                    %io:fwrite("case D"),
                                     get(cycle_process)!{move, NPos, NDir},
                                     elevator_loop(NPos, NDir, Tail)
                             end
                     end;
                 true ->
+                    %io:fwrite("case AGH"),
                     if
                         NPos =/= HPos ->
+                            %io:fwrite("case E"),
                             get(cycle_process)!{move, NPos, Dir},
                             elevator_loop(NPos, Dir, Queue);
                         NPos == HPos ->
-                            NewQueue = update_queue(Tail, NPos, HDst, Dir, -1000),
+                            %io:fwrite("case F"),
+                            NewQueue = update_queue(Tail, NPos, HDst, DDir, -1000),
                             NDir = calculate_dir(NPos, NewQueue),
                             get(cycle_process)!{move, NPos, HDir},
                             elevator_loop(NPos, NDir, NewQueue)
@@ -160,29 +177,37 @@ cycle_loop_idle(Pos) when is_integer(Pos) ->
         the_end ->
             cycle_end();
         {move, Pos, Dir} ->
-            io:fwrite("mam~n"),
+            %io:fwrite("mam~n"),
             cycle_loop_move(Pos, Dir)
     end.
 
 cycle_loop_move(Pos, Dir) when is_integer(Pos)
                        andalso is_integer(Dir) -> 
+    %io:write(Pos),
+    %io:write(Dir),
     receive
         the_end ->
+            %io:fwrite("end"),
             cycle_end()
     after
         1500 ->
+            %io:fwrite("1500"),
             get(drawing_process)!{updated, get(ordinal), Pos, Pos+Dir},
             get(elevator_process)!{updateState, Pos+Dir, Dir}
     end,
+    %io:fwrite("between"),
     receive
         the_end ->
+            %io:fwrite("end"),
             cycle_end();
         {idle} -> 
+            %io:fwrite("idle"),
             cycle_loop_idle(Pos+Dir);
-        {move, NPos, NDir} when NPos == Pos+Dir
-                        andalso Dir == NDir ->
-            cycle_loop_move(Pos+Dir, Dir);
-        {open, NPos, NDir} when NPos == Pos+Dir ->
+        {move, _, NDir}  ->
+            %io:fwrite("mv"),
+            cycle_loop_move(Pos+Dir, NDir);
+        {open, NPos, NDir} ->
+            %io:fwrite("op"),
             cycle_loop_open(NPos, NDir)
     end.
 
@@ -247,12 +272,16 @@ draw_all_initially(Amount, [Low, High])  when is_integer(Amount)
     lists:foreach(fun(X) ->
                       print({printxy, 6*X-1, 6+High, 'O'})
                   end, lists:seq(1, Amount)),
+    print({gotoxy, 1, 6+High+abs(Low)+3}),
+    io:fwrite("Wyjście: 2x CTRL+C"),
     print({gotoxy, 1, 6+High+abs(Low)+5}).
 
-draw_update(Ord,Old,New) -> 
+draw_update(Ord,Old,New) ->
+    %io:fwrite("draw"), 
     [Low, High] = get(range),
     print({printxy, 6*Ord-1, 6+High-Old, 'X'}),
     print({printxy, 6*Ord-1, 6+High-New, 'O'}),
+    print({printxy, 6*Ord-1, 5, New}),
     print({gotoxy, 1, 6+High+abs(Low)+5}). 
 
 calculate_dir(_, []) -> 0;
@@ -260,10 +289,12 @@ calculate_dir(NPos,[{HPos, _, _} | _]) when NPos < HPos -> -1;
 calculate_dir(NPos,[{HPos, _, _} | _]) when NPos > HPos -> 1.
 
 quick_dir(Floor, Dest) when Dest > Floor -> 1;
-quick_dir(Floor, Dest) when Dest < Floor -> -1.
+quick_dir(Floor, Dest) when Dest < Floor -> -1;
+quick_dir(X, X) -> 0.
 
 update_queue([], Pos, Floor, Dir, NDst) when (Floor-Pos)*Dir > 0 -> [{Floor, Dir, NDst}];
 update_queue([], Pos, Floor, Dir, NDst) when (Floor-Pos)*Dir < 0 -> [{Floor, (-Dir), NDst}];
+update_queue([], Pos, Pos,   Dir, NDst) -> [{NDst, Dir, (-1000)}];
 update_queue([{HPos, HDir, HDst} | Tail], Pos, Floor, Dir, NDst) when (Floor-Pos)*(Floor-HPos) < 0 
                                                               andalso Dir*(Floor-Pos) > 0 -> 
     [{Floor, Dir, NDst}, {HPos, HDir, HDst} | Tail];
